@@ -13,5 +13,5 @@ see `ffoxup.sh` for details, including help doc.
 quick install:
 
 ```bash
-wget -O "$HOME/.local/bin/ffoxup" "https://raw.github.com/kafene/ffoxup/master/ffoxup.sh"; chmod +x "$HOME/.local/bin/ffoxup"
+o="$HOME/.local/bin/ffoxup";wget -O "$o" "https://raw.github.com/kafene/ffoxup/master/ffoxup.sh"; chmod +x "$o"
 ```
