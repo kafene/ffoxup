@@ -59,7 +59,7 @@ download_or_resume() {
 }
 
 display_version() {
-    echo "$this v$VERSION"
+    echo "ffoxup v$VERSION"
 }
 
 display_help_message() {
@@ -76,7 +76,7 @@ display_help_message() {
     Installed to: $self
     Version: $(display_version)
     License: Public Domain / Unlicensed <http://unlicense.org/>
-    Website: <https://github.com/kafene/$this>
+    Website: <https://github.com/kafene/ffoxup>
     Download URL: <$url>
 
     Options:
@@ -137,7 +137,7 @@ display_help_message() {
 do_self_update() {
     echo "Updating $self ..."
     download_or_resume "$self" "$update_url"
-    echo "$this has been updated."
+    echo "ffoxup has been updated."
     exit 0
 }
 
@@ -168,10 +168,6 @@ show_current_state() {
     echo "Desktop file: $desktopfile"
     echo "Architecture: $architecture"
     echo "Language: $language"
-}
-
-create_temporary_working_directory() {
-    create_directory "$tempdir"
 }
 
 full_url_was_given_by_user() {
@@ -289,11 +285,16 @@ is_executable realpath && rp="realpath" || rp="busybox realpath"
 # Check other dependencies (except stuff in coreutils/busybox)
 check_dependencies egrep wget sed tar
 
-# vars
-this='ffoxup'
+# Real path to this script
 self=$(test -L "$0" && readlink "$0" || $rp "$0")
-update_url="https://raw.github.com/kafene/$this/master/ffoxup.sh"
-tempdir="$(dirname $(mktemp -u))/$this"
+
+# URL for updates
+update_url="https://raw.github.com/kafene/ffoxup/master/ffoxup.sh"
+
+# Temp working directory
+tempdir="$(dirname $(mktemp -u))/ffoxup"
+
+# Latest version (auto-detected)
 latest=""
 
 # Default options
@@ -326,7 +327,7 @@ StartupWMClass=Firefox"
 parse_command_line_options "$@"
 show_current_state
 ensure_user_wishes_to_continue
-create_temporary_working_directory
+create_directory "$tempdir"
 
 if full_url_was_given_by_user; then
     detect_latest_version_from_full_url
