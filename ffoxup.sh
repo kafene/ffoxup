@@ -2,68 +2,24 @@
 
 set -e
 
-is_executable() {
-    command -v "$1" >/dev/null
-}
+VERSION='0.0.1'
 
-check_dependencies() {
-    local missing=""
-    for dependency in ${@}; do
-        if ! is_executable "$dependency"; then
-            missing="$missing    $dependency\n"
-        fi
-    done
-    if test -n "$missing"; then
-        printf "Missing dependencies:\n$missing"
-        exit 1
-    fi
-}
+# Real path to this script, temporary working directory
+self_path=$(test -L "$0" && readlink "$0" || realpath "$0")
+temp_dir="$(dirname $(mktemp -u))/ffoxup"
 
-ensure_user_wishes_to_continue() {
-    read -p "Continue? [Y/n] "
-    if [[ ! "$REPLY" =~ ^[Yy]$ ]] && [ -n "$REPLY" ]; then
-        echo "Okay, nevermind."
-        exit
-    fi
-}
+# Default options
+url='http://download.cdn.mozilla.net/pub/mozilla.org/firefox/releases/latest'
+install_directory="$HOME/.local/lib/firefox"
+symlink="$HOME/.local/bin/firefox"
+iconfile="$HOME/.local/share/icons/firefox.png"
+desktopfile="$HOME/.local/share/applications/firefox.desktop"
+architecture="$(uname -m)"
+language="en-US"
 
-create_directory() {
-    if test ! -d "$1"; then
-        mkdir -p "$1"
-        echo "mkdir: created directory \`$1\`"
-    fi
-}
-
-file_exists() {
-    test -f "$1"
-}
-
-file_is_not_empty() {
-    test -s "$1"
-}
-
-is_directory() {
-    test -d "$1"
-}
-
-is_empty() {
-    test -z "$1"
-}
-
-download_or_resume() {
-    if file_exists "$1"; then
-        wget -c -O "$1" "$2"
-    else
-        wget -O "$1" "$2"
-    fi
-}
-
-display_version() {
-    echo "ffoxup v$VERSION"
-}
-
-display_help_message() {
-    echo "------------------------------------------------------------
+# help/documentation
+doc="
+------------------------------------------------------------
               __  __
              / _|/ _|
             | |_| |_ _____  ___   _ _ __
@@ -73,11 +29,11 @@ display_help_message() {
                                    | |
                                    |_|
 
-    Installed to: $self
-    Version: $(display_version)
+    Installed to: $self_path
+    Version: v$VERSION
     License: Public Domain / Unlicensed <http://unlicense.org/>
     Website: <https://github.com/kafene/ffoxup>
-    Download URL: <$url>
+    Download base URL: <$url>
 
     Options:
 
@@ -90,25 +46,25 @@ display_help_message() {
             Directory to install Firefox to.
             Make sure it is not the same as the symlink!
             Example: -d /usr/local/lib/firefox
-            Default: $HOME/.local/lib/firefox
+            Default: \$HOME/.local/lib/firefox
 
         -s | --symlink
             Symlink to create to Firefox binary.
             Use 'none' to skip creating a symlink.
             Example: -s /usr/local/bin/firefox
-            Default: $HOME/.local/bin/firefox
+            Default: \$HOME/.local/bin/firefox
 
         -i | --iconfile
             Icon filename to create.
             Use 'none' to skip creating an icon file.
             Example: -i /usr/local/share/icons/firefox.png
-            Default: $HOME/.local/share/icons/firefox.png
+            Default: \$HOME/.local/share/icons/firefox.png
 
         -D | --desktopfile
             Desktop file to create.
             Use 'none' to skip creating a .desktop file.
             Example: -D /usr/local/share/applications/firefox.desktop
-            Default: $HOME/.local/share/applications/firefox.desktop
+            Default: \$HOME/.local/share/applications/firefox.desktop
 
         -a | --architecture
             Architecture to download.
@@ -125,187 +81,22 @@ display_help_message() {
         -u | --update
             Perform a self-update.
 
+        --uninstall
+            Uninstalls Firefox.
+            This will remove the configured symlink file,
+            the icon, the .desktop file, and the installation
+            directory. It will not remove any configuration
+            directories such as \$HOME/.firefox.
+
         -h | -H | --help
             Print this help message.
 
         -v | -V | --version
-            Display the current program version."
-    echo "------------------------------------------------------------"
-    exit 0
-}
+            Display the current program version.
+------------------------------------------------------------
+"
 
-do_self_update() {
-    echo "Updating $self ..."
-    download_or_resume "$self" "$update_url"
-    echo "ffoxup has been updated."
-    exit 0
-}
-
-parse_command_line_options() {
-    while [[ "$1" =~ ^- ]]; do
-        case "$1" in
-            -u | --url) shift; url="$1"; ;;
-            -s | --symlink) shift; symlink="$1"; ;;
-            -d | --directory) shift; directory=$($rp "$1"); ;;
-            -i | --iconfile) shift; iconfile=$($rp "$1"); ;;
-            -D | --desktopfile) shift; desktopfile=$($rp "$1"); ;;
-            -a | --architecture) shift; architecture="$1"; ;;
-            -l | --language) shift; language="$1"; ;;
-            -u | --update) do_self_update; exit 0; ;;
-            -h | -H | --help) display_help_message; exit 0; ;;
-            -v | -V | --version) display_version; exit 0; ;;
-            *) echo "Invalid option: $1"; exit 1; ;;
-        esac
-        shift
-    done
-}
-
-show_current_state() {
-    echo "URL: $url"
-    echo "Symlink: $symlink"
-    echo "Directory: $directory"
-    echo "Icon file: $iconfile"
-    echo "Desktop file: $desktopfile"
-    echo "Architecture: $architecture"
-    echo "Language: $language"
-}
-
-full_url_was_given_by_user() {
-    is_empty $url && [[ "$url" =~ \.tar\.(bz2|gz)$ ]]
-}
-
-detect_latest_version_from_full_url() {
-    latest=$(basename "$url")
-}
-
-detect_base_url_from_full_url() {
-    url=$(dirname "$url")
-}
-
-detect_latest_version() {
-    url="$url/linux-$architecture/$language/"
-    echo "Downloading directory listing from $url ..."
-    latest=$(download_or_resume - "$url" \
-        | egrep -o 'href="([^"]+).tar.bz2"' \
-        | sed -r 's/href="([^"]+)"/\1/')
-}
-
-ensure_latest_version_detected_properly() {
-    if is_empty "$latest"; then
-        echo "Failed to detect file to download."
-        exit 1
-    fi
-}
-
-download_tarball() {
-    echo "URL: $url/$latest ..."
-    echo "Downloading tarball ($latest) ..."
-    ensure_user_wishes_to_continue
-    echo "Downloading. Please stand by ..."
-    download_or_resume "$tempdir/$latest" "$url/$latest"
-    echo "Download complete ..."
-}
-
-ensure_tarball_downloaded_correctly() {
-    if ! file_exists "$tempdir/$latest" \
-    || ! file_is_not_empty "$tempdir/$latest"; then
-        echo "Downloading tarball failed."
-        exit 1
-    fi
-}
-
-extract_tarball() {
-    echo "Extracting tarball ..."
-    tar xjf "$tempdir/$latest" -C "$tempdir"
-}
-
-ensure_tarball_extracted_correctly() {
-    # It should contain a single directory called "firefox"
-    if ! is_directory "$tempdir/firefox"; then
-        echo "Failed to find extracted 'firefox' directory."
-        exit 1
-    fi
-}
-
-move_extracted_folder_to_installation_directory() {
-    echo "Removing previous Firefox program folder ($directory) ..."
-    rm -rf "$directory/"
-    echo "Installing new Firefox program folder ($directory) ..."
-    create_directory $(dirname "$directory")
-    mv "$tempdir/firefox/" "$directory"
-}
-
-make_program_executable_executable() {
-    echo "Making the Firefox executable executable ..."
-    chmod +x "$directory/firefox"
-}
-
-should_create() {
-    test ! "$1" == "none"
-}
-
-create_symlink() {
-    if should_create "$symlink"; then
-        echo "Removing old symlink ..."
-        rm -f "$symlink"
-        echo "Creating new symlink ..."
-        ln -s "$directory/firefox" "$symlink"
-    fi
-}
-
-create_icon_file() {
-    if should_create "$iconfile"; then
-        create_directory $(dirname "$iconfile")
-        echo "Copying Firefox icon to $iconfile ..."
-        cp "$directory/browser/icons/mozicon128.png" "$iconfile"
-    fi
-}
-
-create_desktop_file() {
-    if should_create "$desktopfile"; then
-        create_directory $(dirname "$desktopfile")
-        echo "Creating desktop file ..."
-        echo "$desktopfile_contents" > "$desktopfile"
-    fi
-}
-
-rollback_installation() {
-    rm -rf "$tempdir"
-    rm -rf "$directory"
-    rm -f "$symlink"
-    rm -f "$iconfile"
-    rm -f "$desktopfile"
-}
-
-VERSION='0.0.1'
-
-# Not all systems have realpath? Hope they have busybox then...
-is_executable realpath && rp="realpath" || rp="busybox realpath"
-
-# Check other dependencies (except stuff in coreutils/busybox)
-check_dependencies egrep wget sed tar
-
-# Real path to this script
-self=$(test -L "$0" && readlink "$0" || $rp "$0")
-
-# URL for updates
-update_url="https://raw.github.com/kafene/ffoxup/master/ffoxup.sh"
-
-# Temp working directory
-tempdir="$(dirname $(mktemp -u))/ffoxup"
-
-# Latest version (auto-detected)
-latest=""
-
-# Default options
-url='http://download.cdn.mozilla.net/pub/mozilla.org/firefox/releases/latest'
-directory="$HOME/.local/lib/firefox"
-symlink="$HOME/.local/bin/firefox"
-iconfile="$HOME/.local/share/icons/firefox.png"
-desktopfile="$HOME/.local/share/applications/firefox.desktop"
-architecture="$(uname -m)"
-language="en-US"
-
+# .desktop file template
 desktopfile_contents="[Desktop Entry]
 Version=1.0
 Name=Firefox
@@ -322,29 +113,179 @@ application/xml;application/vnd.mozilla.xul+xml;\
 application/rss+xml;application/rdf+xml;\
 image/gif;image/jpeg;image/png;
 StartupNotify=true
-StartupWMClass=Firefox"
+StartupWMClass=Firefox
+"
 
-parse_command_line_options "$@"
-show_current_state
-ensure_user_wishes_to_continue
-create_directory "$tempdir"
+# Parse command line options
+while [[ "$1" =~ ^- ]]; do
+    case "$1" in
+        -u | --url)
+            shift
+            url="$1"
+        ;;
+        -s | --symlink)
+            shift
+            symlink="$1"
+        ;;
+        -d | --directory)
+            shift
+            install_directory=$(realpath "$1")
+        ;;
+        -i | --iconfile)
+            shift
+            iconfile=$(realpath "$1")
+        ;;
+        -D | --desktopfile)
+            shift
+            desktopfile=$(realpath "$1")
+        ;;
+        -a | --architecture)
+            shift
+            architecture="$1"
+        ;;
+        -l | --language)
+            shift
+            language="$1"
+        ;;
+        -u | --update)
+            update_url="https://raw.github.com/kafene/ffoxup/master/ffoxup.sh"
+            wget -O "$self_path" "$update_url"
+            echo "updated!"
+            exit 0
+        ;;
+        --uninstall)
+            do_uninstall=1
+        ;;
+        -h | -H | --help)
+            echo "$doc"
+            exit 0
+        ;;
+        -v | -V | --version)
+            echo "ffoxup v$VERSION"
+            exit 0; ;;
+        *)
+            echo "Invalid option: $1"
+            exit 1
+        ;;
+    esac
+    shift
+done
 
-if full_url_was_given_by_user; then
-    detect_latest_version_from_full_url
-    detect_base_url_from_full_url
-else
-    detect_latest_version
-    ensure_latest_version_detected_properly
+# Uninstall (after options parsed, so the correct files are used.)
+if [ -n "$do_uninstall" ]; then
+    rm -rf "$temp_dir"
+    rm -rf "$install_directory"
+    rm -f "$symlink"
+    rm -f "$iconfile"
+    rm -f "$desktopfile"
+    echo "Firefox has been removed."
+    exit 0
 fi
 
-download_tarball
-ensure_tarball_downloaded_correctly
-extract_tarball
-ensure_tarball_extracted_correctly
-move_extracted_folder_to_installation_directory
-make_program_executable_executable
-create_symlink
-create_icon_file
-create_desktop_file
+# Check program dependencies (except stuff from coreutils/busybox)
+dependencies="egrep wget sed tar realpath"
+missing_dependencies=""
+for dependency in $dependencies; do
+    if ! command -v "$1" >/dev/null "$dependency"; then
+        missing_dependencies="$missing_dependencies    $dependency\n"
+    fi
+done
+if [ -n "$missing_dependencies" ]; then
+    printf "Missing dependencies:\n$missing_dependencies"
+    exit 1
+fi
+
+echo "URL: $url"
+echo "Symlink: $symlink"
+echo "Install Directory: $install_directory"
+echo "Icon file: $iconfile"
+echo "Desktop file: $desktopfile"
+echo "Architecture: $architecture"
+echo "Language: $language"
+
+# Just before starting stuff that will make some system changes...
+read -p "Continue? [Y/n] "
+[[ ! "$REPLY" =~ ^[Yy]$ ]] && [ -n "$REPLY" ] && exit 0
+
+# Create temporary directory
+mkdir -vp "$temp_dir"
+
+# If user submitted a url and its a tarball then use it
+# Otherwise try to detect the latest version from the
+# Mozilla CDN directory listing.
+if [ -n "$url" ] && [[ "$url" =~ \.tar\.[A-Za-z0-9]{1,5}$ ]]; then
+    latest=$(basename "$url")
+    url="$(dirname "$url")/"
+else
+    url="$url/linux-$architecture/$language/"
+    echo "Downloading directory listing ..."
+    latest=$(wget -q -O - "$url" \
+        | egrep -o 'href="([^"]+).tar.bz2"' \
+        | sed -r 's/href="([^"]+)"/\1/')
+fi
+
+if [ -z "$latest" ]; then
+    echo "Failed to detect download URL for latest version."
+    exit 1
+fi
+
+echo "Detected version to download: $latest ..."
+
+# Before making the large download.
+read -p "Continue to download Firefox tarball? [Y/n] "
+[[ ! "$REPLY" =~ ^[Yy]$ ]] && [ -n "$REPLY" ] && exit 0
+
+# Download, but if the target already exists, resume download instead.
+if [ -f "$temp_dir/$latest" ]; then
+    wget -c -O "$temp_dir/$latest" "$url/$latest"
+else
+    wget -O "$temp_dir/$latest" "$url/$latest"
+fi
+
+echo "Download complete ..."
+
+if [ ! -f "$temp_dir/$latest" ] \
+|| [ ! -s "$temp_dir/$latest" ]; then
+    echo "Downloading tarball failed."
+    exit 1
+fi
+
+echo "Extracting tarball ..."
+tar xjf "$temp_dir/$latest" -C "$temp_dir"
+
+# It should contain a single directory called "firefox"
+if [ ! -d "$temp_dir/firefox" ]; then
+    echo "Failed to find extracted 'firefox' directory."
+    exit 1
+fi
+
+echo "Removing previous Firefox program folder ($install_directory) ..."
+rm -rf "$install_directory/"
+
+echo "Installing new Firefox program folder ($install_directory) ..."
+mkdir -vp $(dirname "$install_directory")
+mv "$temp_dir/firefox/" "$install_directory"
+
+echo "Making the Firefox executable executable ..."
+chmod +x "$install_directory/firefox"
+
+if [ ! "$symlink" == "none" ]; then
+    echo "Removing old symlink ..."
+    rm -f "$symlink"
+    echo "Creating new symlink ..."
+    ln -s "$install_directory/firefox" "$symlink"
+fi
+
+if [ ! "$iconfile" == "none" ]; then
+    mkdir -vp $(dirname "$iconfile")
+    echo "Copying Firefox icon to $iconfile ..."
+    cp "$install_directory/browser/icons/mozicon128.png" "$iconfile"
+fi
+
+if [ ! "$desktopfile" == "none" ]; then
+    mkdir -vp $(dirname "$desktopfile")
+    echo "Creating desktop file ..."
+    echo "$desktopfile_contents" > "$desktopfile"
+fi
 
 echo "Firefox has been updated."
