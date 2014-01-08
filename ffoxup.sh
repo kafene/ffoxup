@@ -292,13 +292,13 @@ if [ ! "$symlink" = "none" ]; then
     ln -s "$install_dir/firefox" "$symlink"
 fi
 
-if [ ! "$iconfile" == "none" ]; then
+if [ ! "$iconfile" = "none" ]; then
     mkdir -vp "$(dirname "$iconfile")"
     echo "Copying Firefox icon to $iconfile ..."
     cp "$install_dir/browser/icons/mozicon128.png" "$iconfile"
 fi
 
-if [ ! "$desktopfile" == "none" ]; then
+if [ ! "$desktopfile" = "none" ]; then
     mkdir -vp "$(dirname "$desktopfile")"
     echo "Creating desktop file ..."
     echo "$desktopfile_contents" > "$desktopfile"
