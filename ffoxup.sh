@@ -5,12 +5,12 @@ set -e
 VERSION='0.0.1'
 
 # Real path to this script, temporary working directory
-self_path=$(test -L "$0" && readlink "$0" || realpath "$0")
-temp_dir="$(dirname $(mktemp -u))/ffoxup"
+self_path="$(test -L "$0" && readlink "$0" || realpath "$0")"
+temp_dir="$(dirname "$(mktemp -u)")/ffoxup"
 
 # Default options
 url='http://download.cdn.mozilla.net/pub/mozilla.org/firefox/releases/latest'
-install_directory="$HOME/.local/lib/firefox"
+install_dir="$HOME/.local/lib/firefox"
 symlink="$HOME/.local/bin/firefox"
 iconfile="$HOME/.local/share/icons/firefox.png"
 desktopfile="$HOME/.local/share/applications/firefox.desktop"
@@ -129,15 +129,15 @@ while [[ "$1" =~ ^- ]]; do
         ;;
         -d | --directory)
             shift
-            install_directory=$(realpath "$1")
+            install_dir="$(realpath "$1")"
         ;;
         -i | --iconfile)
             shift
-            iconfile=$(realpath "$1")
+            iconfile="$(realpath "$1")"
         ;;
         -D | --desktopfile)
             shift
-            desktopfile=$(realpath "$1")
+            desktopfile="$(realpath "$1")"
         ;;
         -a | --architecture)
             shift
@@ -171,10 +171,26 @@ while [[ "$1" =~ ^- ]]; do
     shift
 done
 
-# Uninstall (after options parsed, so the correct files are used.)
+# trim any trailing `/` off
+# usually realpath will take care of this but I'm taking an extra caution.
+install_dir="$(echo "$install_dir" | sed -e 's/\/*$//g')"
+temp_dir="$(echo "$temp_dir" | sed -e 's/\/*$//g')"
+
+# Uninstall (this is done after options parsed, so the correct files are used.)
 if [ -n "$do_uninstall" ]; then
-    rm -rf "$temp_dir"
-    rm -rf "$install_directory"
+    # Confirm everything
+    echo "I am going to execute the following commands:"
+    echo "    rm -rf $install_dir/"
+    echo "    rm -rf $temp_dir/"
+    echo "    rm -f $symlink"
+    echo "    rm -f $iconfile"
+    echo "    rm -f $desktopfile"
+
+    read -p "Shall I proceed? [y/N] "
+    [ -z "$REPLY" ] || [[ ! "$REPLY" =~ ^[Yy]$ ]] && exit 0
+
+    rm -rf "$install_dir/"
+    rm -rf "$temp_dir/"
     rm -f "$symlink"
     rm -f "$iconfile"
     rm -f "$desktopfile"
@@ -184,27 +200,29 @@ fi
 
 # Check program dependencies (except stuff from coreutils/busybox)
 dependencies="egrep wget sed tar realpath"
-missing_dependencies=""
+missing=""
+
 for dependency in $dependencies; do
     if ! command -v "$1" >/dev/null "$dependency"; then
-        missing_dependencies="$missing_dependencies    $dependency\n"
+        missing="$missing    $dependency\n"
     fi
 done
-if [ -n "$missing_dependencies" ]; then
-    printf "Missing dependencies:\n$missing_dependencies"
+
+if [ -n "$missing" ]; then
+    printf "Missing dependencies:\n$missing"
     exit 1
 fi
 
-echo "URL: $url"
-echo "Symlink: $symlink"
-echo "Install Directory: $install_directory"
-echo "Icon file: $iconfile"
-echo "Desktop file: $desktopfile"
-echo "Architecture: $architecture"
-echo "Language: $language"
+echo "URL:                $url"
+echo "Symlink:            $symlink"
+echo "Install Directory:  $install_dir"
+echo "Icon file:          $iconfile"
+echo "Desktop file:       $desktopfile"
+echo "Architecture:       $architecture"
+echo "Language:           $language"
 
 # Just before starting stuff that will make some system changes...
-read -p "Continue? [Y/n] "
+read -p "Everything look okay? [Y/n] "
 [[ ! "$REPLY" =~ ^[Yy]$ ]] && [ -n "$REPLY" ] && exit 0
 
 # Create temporary directory
@@ -214,14 +232,15 @@ mkdir -vp "$temp_dir"
 # Otherwise try to detect the latest version from the
 # Mozilla CDN directory listing.
 if [ -n "$url" ] && [[ "$url" =~ \.tar\.[A-Za-z0-9]{1,5}$ ]]; then
-    latest=$(basename "$url")
+    latest="$(basename "$url")"
     url="$(dirname "$url")/"
 else
     url="$url/linux-$architecture/$language/"
     echo "Downloading directory listing ..."
-    latest=$(wget -q -O - "$url" \
+
+    latest="$(wget -q -O - "$url" \
         | egrep -o 'href="([^"]+).tar.bz2"' \
-        | sed -r 's/href="([^"]+)"/\1/')
+        | sed -r 's/href="([^"]+)"/\1/')"
 fi
 
 if [ -z "$latest" ]; then
@@ -244,8 +263,7 @@ fi
 
 echo "Download complete ..."
 
-if [ ! -f "$temp_dir/$latest" ] \
-|| [ ! -s "$temp_dir/$latest" ]; then
+if [ ! -f "$temp_dir/$latest" ] || [ ! -s "$temp_dir/$latest" ]; then
     echo "Downloading tarball failed."
     exit 1
 fi
@@ -259,31 +277,29 @@ if [ ! -d "$temp_dir/firefox" ]; then
     exit 1
 fi
 
-echo "Removing previous Firefox program folder ($install_directory) ..."
-rm -rf "$install_directory/"
+# Note - neither of these should have a trailing slash for "cp" to work right
+echo "Copying the downloaded 'firefox' folder contents to $install_dir ..."
+mkdir -vp "$install_dir"
+cp -rf "$temp_dir/firefox" "$install_dir"
 
-echo "Installing new Firefox program folder ($install_directory) ..."
-mkdir -vp $(dirname "$install_directory")
-mv "$temp_dir/firefox/" "$install_directory"
+echo "Making the Firefox binary executable (+x) ..."
+chmod +x "$install_dir/firefox"
 
-echo "Making the Firefox executable executable ..."
-chmod +x "$install_directory/firefox"
-
-if [ ! "$symlink" == "none" ]; then
+if [ ! "$symlink" = "none" ]; then
     echo "Removing old symlink ..."
     rm -f "$symlink"
     echo "Creating new symlink ..."
-    ln -s "$install_directory/firefox" "$symlink"
+    ln -s "$install_dir/firefox" "$symlink"
 fi
 
 if [ ! "$iconfile" == "none" ]; then
-    mkdir -vp $(dirname "$iconfile")
+    mkdir -vp "$(dirname "$iconfile")"
     echo "Copying Firefox icon to $iconfile ..."
-    cp "$install_directory/browser/icons/mozicon128.png" "$iconfile"
+    cp "$install_dir/browser/icons/mozicon128.png" "$iconfile"
 fi
 
 if [ ! "$desktopfile" == "none" ]; then
-    mkdir -vp $(dirname "$desktopfile")
+    mkdir -vp "$(dirname "$desktopfile")"
     echo "Creating desktop file ..."
     echo "$desktopfile_contents" > "$desktopfile"
 fi
